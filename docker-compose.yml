@@ -1,4 +1,4 @@
-version: "3.8"
+version: '3.8'
 
 services:
   clove:
@@ -8,9 +8,9 @@ services:
     container_name: clove
     restart: unless-stopped
     ports:
-      - "5201:5201"
+      - '5201:5201'
     volumes:
-      - ./data:/data
+      - /root/claude_data:/data
     environment:
       # Server configuration
       - HOST=0.0.0.0
@@ -37,6 +37,8 @@ services:
       - LOG_LEVEL=INFO
       - LOG_TO_FILE=true
       - LOG_FILE_PATH=/data/logs/app.log
+    env_file:
+      - .env
 
 volumes:
   data:
