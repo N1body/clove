@@ -38,6 +38,7 @@ class EventParser:
         """
         async for chunk in stream:
             self.buffer += chunk
+            self._normalize_buffer()
 
             async for event in self._process_buffer():
                 logger.debug(f"Parsed event:\n{event.model_dump()}")
@@ -133,6 +134,12 @@ class EventParser:
             logger.warning(f"Flushing incomplete buffer: {self.buffer[:100]}...")
 
             self.buffer += "\n\n"
+            self._normalize_buffer()
 
             async for event in self._process_buffer():
                 yield event
+
+    def _normalize_buffer(self) -> None:
+        """Normalize line endings so SSE message splitting works with CRLF streams."""
+        if "\r" in self.buffer:
+            self.buffer = self.buffer.replace("\r\n", "\n").replace("\r", "\n")
