@@ -8,6 +8,38 @@ from app.core.external.claude_client import ClaudeWebClient
 from app.services.account import account_manager
 
 
+class StreamGuard:
+    """
+    Wraps an async iterator and absorbs aclose() calls to prevent
+    the underlying stream from being closed.
+
+    This is critical for tool call flows where the SSE connection to
+    Claude.ai must remain open between the tool_use response and the
+    tool_result submission. Without this guard, Python's async for
+    cleanup (on break, GeneratorExit, or GC) would cascade aclose()
+    through the generator chain and close the HTTP connection, causing
+    Claude.ai to reject subsequent tool_result submissions with a 404
+    "request expired" error.
+
+    Normal stream consumption (via __anext__ / StopAsyncIteration) is
+    unaffected — the underlying generator's cleanup code still runs
+    when the stream is naturally exhausted.
+    """
+
+    def __init__(self, stream: AsyncIterator):
+        self._stream = stream
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return await self._stream.__anext__()
+
+    async def aclose(self):
+        # Intentionally do NOT propagate to the underlying stream.
+        pass
+
+
 class ClaudeWebSession:
     def __init__(self, session_id: str):
         self.session_id = session_id
@@ -77,7 +109,11 @@ class ClaudeWebSession:
         self.sse_stream = self.stream(response)
 
         logger.debug(f"Sent message for session {self.session_id}")
-        return self.sse_stream
+        # Wrap in StreamGuard to prevent aclose() from cascading through
+        # the generator chain and closing the SSE connection. This is
+        # essential for tool call flows where the connection must remain
+        # open between tool_use and tool_result.
+        return StreamGuard(self.sse_stream)
 
     async def upload_file(
         self, file_data: bytes, filename: str, content_type: str
@@ -87,6 +123,8 @@ class ClaudeWebSession:
 
     async def send_tool_result(self, payload: Dict[str, Any]) -> None:
         """Send tool result to Claude.ai."""
+        self.update_activity()  # Prevent session timeout during long tool executions
+
         if not self.conv_uuid:
             raise ValueError(
                 "Session must have an active conversation to send tool results"

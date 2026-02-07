@@ -8,6 +8,7 @@ from app.models.streaming import MessageStartEvent, StreamingEvent
 from app.services.tool_call import tool_call_manager
 from app.services.session import session_manager
 from app.services.event_processing import EventSerializer
+from app.core.claude_session import StreamGuard
 
 event_serializer = EventSerializer()
 
@@ -85,8 +86,10 @@ class ToolResultProcessor(BaseProcessor):
             tool_call_manager.complete_tool_call(tool_result.tool_use_id)
             return context
 
-        # Continue with the existing stream
-        resumed_stream = session.sse_stream
+        # Continue with the existing stream, wrapped in StreamGuard to
+        # prevent aclose() from cascading through the generator chain
+        # and closing the SSE connection (important for consecutive tool calls).
+        resumed_stream = StreamGuard(session.sse_stream)
 
         message_start_event = MessageStartEvent(
             type="message_start",
